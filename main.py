@@ -73,7 +73,7 @@ class Player(pg.sprite.Sprite):
             self.animation_count = 0
 
     def loop(self, fps):
-        self.y_vel += min(1, (self.fall_count / fps) * self.GRAVITY)
+        # self.y_vel += min(1, (self.fall_count / fps) * self.GRAVITY)
         self.move(self.x_vel, self.y_vel)
 
         self.fall_count += 1
