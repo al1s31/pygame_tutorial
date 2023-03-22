@@ -174,8 +174,9 @@ def main(window):
     background, bg_image = get_background("Brown.png")
     block_size = 96
 
+    floor = [Block(i* block_size, HEIGHT - block_size, block_size)for i in range(-WIDTH // block_size,(WIDTH * 2) // block_size)]
     player = Player(100, 100, 50, 50)
-    blocks = [Block(0,HEIGHT - block_size, block_size)]
+
 
     run = True
     while run:
@@ -188,7 +189,7 @@ def main(window):
         
         player.loop(FPS)
         move_handling(player)
-        draw(window, background, bg_image, player,blocks)
+        draw(window, background, bg_image, player,floor)
         
     pg.quit()
     quit()
