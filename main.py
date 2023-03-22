@@ -45,7 +45,7 @@ def get_block(size):
     path = join("assets", "Terrain","Terrain.png")
     image = pg.image.load(path).convert_alpha()
     surface = pg.Surface((size, size),pg.SRCALPHA,32)
-    rect = pg.Rect(96,63, size, size)
+    rect = pg.Rect(96,64, size, size)
     surface.blit(image, (0,0), rect)
     return pg.transform.scale2x(surface)
 
@@ -53,7 +53,6 @@ def get_block(size):
 class Player(pg.sprite.Sprite):
 
     VELOCITY = 5
-    COLOR = (45, 200, 255)
     GRAVITY = 1
     SPRITES = load_sprite_sheet("MainCharacters", "NinjaFrog", 32, 32, True )
     ANIMATION_DELAY = 3
@@ -67,6 +66,19 @@ class Player(pg.sprite.Sprite):
         self.direction = "left"
         self.animation_count = 0
         self.fall_count = 0
+        self.jump_count = 0
+        self.hit = False
+        self.hit_count = 0
+    
+    def make_hit(self):
+        self.hit = True
+
+    def jump(self):
+        self.y_vel = - self.GRAVITY * 8
+        self.animation_count = 0 
+        self.jump_count += 1
+        if self.jump_count == 1:
+            self.fall_count = 0
     
     def move(self, dx, dy):
         self.rect.x += dx
@@ -85,15 +97,41 @@ class Player(pg.sprite.Sprite):
             self.animation_count = 0
 
     def loop(self, fps):
-        # self.y_vel += min(1, (self.fall_count / fps) * self.GRAVITY)
+        self.y_vel += min(1, (self.fall_count / fps) * self.GRAVITY)
         self.move(self.x_vel, self.y_vel)
+
+        if self.hit:
+            self.hit_count += 1
+        if self.hit_count > fps * 1.5:
+            self.hit = False
+            self.hit_count = 0
 
         self.fall_count += 1
         self.update_sprite()
-    
+
+    def landed(self):
+        self.fall_count = 0
+        self.y_vel = 0
+        self.jump_count = 0
+
+    def hit_head(self):
+        self.count = 0
+        self.y_vel *= -1
+
     def update_sprite(self):  #adding animation to character
         sprite_sheet = "idle"
-        if self.x_vel != 0:
+
+        if self.hit:
+            sprite_sheet = "hit"
+        elif self.y_vel < 0:
+            if self.jump_count == 1:
+                sprite_sheet = "jump"
+            elif self.jump_count ==2:
+                sprite_sheet = "double_jump"
+        elif self.y_vel > self.GRAVITY * 2:
+            sprite_sheet = "fall"
+
+        elif self.x_vel != 0:
             sprite_sheet = "run"
 
         sprite_sheet_name = sprite_sheet + "_" + self.direction
@@ -109,8 +147,8 @@ class Player(pg.sprite.Sprite):
         self.rect = self.sprite.get_rect(topleft = (self.rect.x, self.rect.y))
         self.mask = pg.mask.from_surface(self.sprite)
 
-    def draw(self, window):
-        window.blit(self.sprite, (self.rect.x, self.rect.y))
+    def draw(self, window, offset_x):
+        window.blit(self.sprite, (self.rect.x - offset_x, self.rect.y))
 
 
 class Object(pg.sprite.Sprite):
@@ -122,8 +160,8 @@ class Object(pg.sprite.Sprite):
         self.height = height
         self.name = name
 
-    def draw(self,window):
-        window.blit(self.image, (self.rect.x, self.rect.y))
+    def draw(self,window, offset_x):
+        window.blit(self.image, (self.rect.x - offset_x, self.rect.y))
 
 class Block(Object):
     def __init__(self, x, y, size):
@@ -132,6 +170,36 @@ class Block(Object):
         self.image.blit(block,(0,0))
         self.mask = pg.mask.from_surface(self.image)
 
+class Fire(Object):
+    ANIMATION_DELAY = 3
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, "fire")
+        self.fire = load_sprite_sheet("Traps", "Fire", width, height)
+        self.image = self.fire["off"][0]
+        self.mask = pg.mask.from_surface(self.image)
+        self.animation_count = 0 
+        self.animation_name = "off"
+
+    def animation_on(self):
+        self.animation_name = "on"
+
+    def animation_off(self):
+        self.animation_name = "off"
+
+    def loop (self):
+    
+        sprites = self.fire[self.animation_name]
+        sprite_index = (self.animation_count // 
+                         self.ANIMATION_DELAY) % len(sprites)
+        
+        self.image = sprites[sprite_index]
+        self.animation_count += 1
+
+        self.rect = self.image.get_rect(topleft = (self.rect.x, self.rect.y))
+        self.mask = pg.mask.from_surface(self.image)
+
+        if self.animation_count // self.ANIMATION_DELAY > len(sprites):
+            self.animation_count = 0
 
 def get_background(bg_name):
     image = pg.image.load(join("assets", "Background", bg_name))
@@ -145,27 +213,64 @@ def get_background(bg_name):
 
     return tiles,image
 
-def draw(window, background, bg_image, player, objects):
+def draw(window, background, bg_image, player, objects, offset_x):
     for tile in background:
         window.blit(bg_image, tile)
 
     for object in objects:
-        object.draw(window)
+        object.draw(window, offset_x)
 
-    player.draw(window)
+    player.draw(window, offset_x)
 
     pg.display.update()
 
-def move_handling(player):
+def vertical_coll(player, objects, dy):
+    collided_objects = []
+    for obj in objects:
+        if pg.sprite.collide_mask(player,obj):
+            if dy > 0 :
+                player.rect.bottom = obj.rect.top 
+                player.landed()
+            elif dy < 0 :
+                player.rect.top = obj.rect.bottom
+                player.hit_head()
+
+            collided_objects.append(obj)
+
+    return collided_objects
+
+def horizontal_coll(player, objects, dx):
+    player.move(dx, 0)
+    player.update()
+    collided_objects = None 
+
+    for obj in objects :
+        if pg.sprite.collide_mask(player, obj):
+            collided_objects = obj
+            break
+    
+    player.move(-dx, 0)
+    player.update()
+    return collided_objects
+
+def move_handling(player,objects):
     key = pg.key.get_pressed()
 
     player.x_vel = 0
-    if key[pg.K_LEFT] or key[pg.K_a]:
+    collide_left = horizontal_coll(player, objects, player.VELOCITY * -2)
+    collide_right = horizontal_coll(player, objects, player.VELOCITY * 2)
+
+    if ((key[pg.K_LEFT] or key[pg.K_a]) and (not collide_left)):
         player.move_left(player.VELOCITY)
-    if key[pg.K_RIGHT] or key[pg.K_d]:
+    if ((key[pg.K_RIGHT] or key[pg.K_d]) and (not collide_right)):
         player.move_right(player.VELOCITY)
 
-    player.y_vel = 0
+    vertical_collide = vertical_coll(player, objects, player.y_vel) 
+    to_check = [collide_left, collide_right, *vertical_collide]
+    
+    for obj in to_check:
+        if obj and obj.name == "fire":
+            player.make_hit()
     
 
 def main(window):
@@ -173,9 +278,20 @@ def main(window):
     clock = pg.time.Clock()
     background, bg_image = get_background("Brown.png")
     block_size = 96
+    offset_x = 0
+    scroll_area_width = 200
 
-    floor = [Block(i* block_size, HEIGHT - block_size, block_size)for i in range(-WIDTH // block_size,(WIDTH * 2) // block_size)]
-    player = Player(100, 100, 50, 50)
+    player = Player(0, HEIGHT - (2 * scroll_area_width ), 50, 50)
+
+    fire = Fire(100, HEIGHT - block_size -64, 16, 32)
+    
+    fire.animation_on()
+
+    floor = [Block(i * block_size, HEIGHT - block_size, block_size)
+             for i in range(-WIDTH // block_size,(WIDTH * 2) // block_size)]
+    
+    objects =[*floor, Block(-0, HEIGHT - block_size * 2, block_size),
+              Block(block_size * 4, HEIGHT - block_size * 3, block_size),fire]
 
 
     run = True
@@ -186,10 +302,18 @@ def main(window):
             if event.type == pg.QUIT:
                 run = False
                 break
+
+            if event.type == pg.KEYDOWN:
+                if (event.key == pg.K_UP or event.key == pg.K_w) and player.jump_count < 2:
+                    player.jump()
         
         player.loop(FPS)
-        move_handling(player)
-        draw(window, background, bg_image, player,floor)
+        fire.loop()
+        move_handling(player,objects)
+        draw(window, background, bg_image, player,objects, offset_x)
+
+        if((player.rect.right - offset_x >= WIDTH - scroll_area_width) and player.x_vel > 0) or ((player.rect.left - offset_x <= scroll_area_width) and player.x_vel < 0):
+            offset_x += player.x_vel 
         
     pg.quit()
     quit()
